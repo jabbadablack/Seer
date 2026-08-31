@@ -74,6 +74,7 @@ namespace EMotionFX::MotionMatching
 
         size_t GetLowestCostFrameIndex() const { return m_lowestCostFrameIndex; }
         void SetLowestCostSearchFrequency(float frequency) { m_lowestCostSearchFrequency = frequency; }
+        void SetBlendTime(float blendTime) { m_blendTime = blendTime; }
         float GetNewMotionTime() const { return m_newMotionTime; }
 
         //! Get the cached trajectory feature.
@@ -93,11 +94,9 @@ namespace EMotionFX::MotionMatching
 
         MotionMatchingData* m_data = nullptr;
         ActorInstance* m_actorInstance = nullptr;
-        Pose m_blendSourcePose;
-        Pose m_blendTargetPose;
+        Pose m_blendOffsetPose;
         Pose m_queryPose; //! Input query pose for the motion matching search.
         MotionInstance* m_motionInstance = nullptr;
-        MotionInstance* m_prevMotionInstance = nullptr;
         Transform m_motionExtractionDelta = Transform::CreateIdentity();
 
         QueryVector m_queryVector; //!< The input query features to be compared to every entry/row in the feature matrix with the motion matching search.
@@ -116,8 +115,8 @@ namespace EMotionFX::MotionMatching
         size_t m_lowestCostFrameIndex = InvalidIndex;
         float m_lowestCostSearchFrequency = 5.0f; //< How often the lowest cost frame shall be searched per second.
 
-        bool m_blending = false;
-        float m_blendWeight = 1.0f;
+        float m_blendTime = 0.25f;
+        float m_blendWeight = 0.0f;
         float m_blendProgressTime = 0.0f; //< How long are we already blending? In seconds.
 
         /// Buffers used for FindLowestCostFrameIndex().

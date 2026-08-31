@@ -301,6 +301,7 @@ namespace EMotionFX::MotionMatching
 
         MotionMatching::MotionMatchingInstance* instance = uniqueData->m_instance;
         instance->SetLowestCostSearchFrequency(m_lowestCostSearchFrequency);
+        instance->SetBlendTime(m_blendTime);
 
         Pose& outTransformPose = outputPose->GetPose();
         instance->Output(outTransformPose);
@@ -383,8 +384,9 @@ namespace EMotionFX::MotionMatching
         }
 
         serializeContext->Class<BlendTreeMotionMatchNode, AnimGraphNode>()
-            ->Version(11)
+            ->Version(12)
             ->Field("lowestCostSearchFrequency", &BlendTreeMotionMatchNode::m_lowestCostSearchFrequency)
+            ->Field("blendTime", &BlendTreeMotionMatchNode::m_blendTime)
             ->Field("sampleRate", &BlendTreeMotionMatchNode::m_sampleRate)
             ->Field("controlSplineMode", &BlendTreeMotionMatchNode::m_trajectoryQueryMode)
             ->Field("pathRadius", &BlendTreeMotionMatchNode::m_pathRadius)
@@ -419,6 +421,12 @@ namespace EMotionFX::MotionMatching
                 ->Attribute(AZ::Edit::Attributes::Min, 0.001f)
                 ->Attribute(AZ::Edit::Attributes::Max, std::numeric_limits<float>::max())
                 ->Attribute(AZ::Edit::Attributes::Step, 0.05f)
+            ->DataElement(AZ::Edit::UIHandlers::Default, &BlendTreeMotionMatchNode::m_blendTime,
+                QT_TRANSLATE_NOOP("MotionMatching", "Blend time"),
+                QT_TRANSLATE_NOOP("MotionMatching", "How long it takes, in seconds, for the pose difference introduced by switching to a new best matching frame to decay away. Independent of the search frequency."))
+                ->Attribute(AZ::Edit::Attributes::Min, 0.0f)
+                ->Attribute(AZ::Edit::Attributes::Max, std::numeric_limits<float>::max())
+                ->Attribute(AZ::Edit::Attributes::Step, 0.01f)
             ->DataElement(AZ::Edit::UIHandlers::Default, &BlendTreeMotionMatchNode::m_sampleRate,
                 QT_TRANSLATE_NOOP("MotionMatching", "Feature sample rate"),
                 QT_TRANSLATE_NOOP("MotionMatching", "The sample rate (in Hz) used for extracting the features from the animations. The higher the sample rate, the more data will be used and the more options the motion matching search has available for the best matching frame."))

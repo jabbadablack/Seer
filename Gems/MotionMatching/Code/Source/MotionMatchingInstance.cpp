@@ -50,11 +50,6 @@ namespace EMotionFX::MotionMatching
         {
             GetMotionInstancePool().Free(m_motionInstance);
         }
-
-        if (m_prevMotionInstance)
-        {
-            GetMotionInstancePool().Free(m_prevMotionInstance);
-        }
     }
 
     MotionInstance* MotionMatchingInstance::CreateMotionInstance() const
@@ -93,16 +88,9 @@ namespace EMotionFX::MotionMatching
             m_motionInstance = CreateMotionInstance();
         }
 
-        if (!m_prevMotionInstance)
-        {
-            m_prevMotionInstance = CreateMotionInstance();
-        }
-
-        m_blendSourcePose.LinkToActorInstance(m_actorInstance);
-        m_blendSourcePose.InitFromBindPose(m_actorInstance);
-
-        m_blendTargetPose.LinkToActorInstance(m_actorInstance);
-        m_blendTargetPose.InitFromBindPose(m_actorInstance);
+        m_blendOffsetPose.LinkToActorInstance(m_actorInstance);
+        m_blendOffsetPose.InitFromBindPose(m_actorInstance);
+        m_blendOffsetPose.MakeAdditive(*m_actorInstance->GetTransformData()->GetBindPose());
 
         m_queryPose.LinkToActorInstance(m_actorInstance);
         m_queryPose.InitFromBindPose(m_actorInstance);
@@ -249,23 +237,7 @@ namespace EMotionFX::MotionMatching
             return;
         }
 
-        // Blend the motion extraction deltas.
-        // Note: Make sure to update the previous as well as the current/target motion instances.
-        if (m_blendWeight >= 1.0f - AZ::Constants::FloatEpsilon)
-        {
-            m_motionInstance->ExtractMotion(m_motionExtractionDelta);
-        }
-        else if (m_blendWeight > AZ::Constants::FloatEpsilon && m_blendWeight < 1.0f - AZ::Constants::FloatEpsilon)
-        {
-            Transform targetMotionExtractionDelta;
-            m_motionInstance->ExtractMotion(m_motionExtractionDelta);
-            m_prevMotionInstance->ExtractMotion(targetMotionExtractionDelta);
-            m_motionExtractionDelta.Blend(targetMotionExtractionDelta, m_blendWeight);
-        }
-        else
-        {
-            m_prevMotionInstance->ExtractMotion(m_motionExtractionDelta);
-        }
+        m_motionInstance->ExtractMotion(m_motionExtractionDelta);
     }
 
     void MotionMatchingInstance::Output(Pose& outputPose)
@@ -285,40 +257,15 @@ namespace EMotionFX::MotionMatching
             return;
         }
 
-        // Sample the motions and blend the results when needed.
-        if (m_blendWeight >= 1.0f - AZ::Constants::FloatEpsilon)
+        outputPose.InitFromBindPose(m_actorInstance);
+        if (m_motionInstance)
         {
-            m_blendTargetPose.InitFromBindPose(m_actorInstance);
-            if (m_motionInstance)
-            {
-                SamplePose(m_motionInstance, m_blendTargetPose);
-            }
-            outputPose = m_blendTargetPose;
+            SamplePose(m_motionInstance, outputPose);
         }
-        else if (m_blendWeight > AZ::Constants::FloatEpsilon && m_blendWeight < 1.0f - AZ::Constants::FloatEpsilon)
-        {
-            m_blendSourcePose.InitFromBindPose(m_actorInstance);
-            m_blendTargetPose.InitFromBindPose(m_actorInstance);
-            if (m_motionInstance)
-            {
-                SamplePose(m_motionInstance, m_blendTargetPose);
-            }
-            if (m_prevMotionInstance)
-            {
-                SamplePose(m_prevMotionInstance, m_blendSourcePose);
-            }
 
-            outputPose = m_blendSourcePose;
-            outputPose.Blend(&m_blendTargetPose, m_blendWeight);
-        }
-        else
+        if (m_blendWeight > 0.0f)
         {
-            m_blendSourcePose.InitFromBindPose(m_actorInstance);
-            if (m_prevMotionInstance)
-            {
-                SamplePose(m_prevMotionInstance, m_blendSourcePose);
-            }
-            outputPose = m_blendSourcePose;
+            outputPose.ApplyAdditive(m_blendOffsetPose, m_blendWeight);
         }
     }
 
@@ -366,28 +313,13 @@ namespace EMotionFX::MotionMatching
         const float newMotionTime = m_motionInstance->CalcPlayStateAfterUpdate(timePassedInSeconds).m_currentTime;
         m_newMotionTime = newMotionTime;
 
-        // Keep on playing the previous instance as we're blending the poses and motion extraction deltas.
-        m_prevMotionInstance->Update(timePassedInSeconds);
-
         m_timeSinceLastFrameSwitch += timePassedInSeconds;
 
         const float lowestCostSearchTimeInterval = 1.0f / m_lowestCostSearchFrequency;
 
-        if (m_blending)
-        {
-            const float maxBlendTime = lowestCostSearchTimeInterval;
-            m_blendProgressTime += timePassedInSeconds;
-            if (m_blendProgressTime > maxBlendTime)
-            {
-                m_blendWeight = 1.0f;
-                m_blendProgressTime = maxBlendTime;
-                m_blending = false;
-            }
-            else
-            {
-                m_blendWeight = AZ::GetClamp(m_blendProgressTime / maxBlendTime, 0.0f, 1.0f);
-            }
-        }
+        m_blendProgressTime += timePassedInSeconds;
+        const float blendProgress = (m_blendTime > 0.0f) ? AZ::GetClamp(m_blendProgressTime / m_blendTime, 0.0f, 1.0f) : 1.0f;
+        m_blendWeight = (1.0f - blendProgress) * (1.0f - blendProgress) * (1.0f + 2.0f * blendProgress);
 
         const bool searchLowestCostFrame = m_timeSinceLastFrameSwitch >= lowestCostSearchTimeInterval;
         if (searchLowestCostFrame)
@@ -433,16 +365,20 @@ namespace EMotionFX::MotionMatching
 
             if (lowestCostFrameIndex != currentFrameIndex && !sameLocation)
             {
-                // Start a blend.
-                m_blending = true;
-                m_blendWeight = 0.0f;
-                m_blendProgressTime = 0.0f;
+                AnimGraphPosePool& posePool = GetEMotionFX().GetThreadData(m_actorInstance->GetThreadIndex())->GetPosePool();
+                AnimGraphPose* sourcePose = posePool.RequestPose(m_actorInstance);
+                SamplePose(m_motionInstance->GetMotion(), sourcePose->GetPose(), newMotionTime);
+                if (m_blendWeight > 0.0f)
+                {
+                    sourcePose->GetPose().ApplyAdditive(m_blendOffsetPose, m_blendWeight);
+                }
+                SamplePose(lowestCostFrame.GetSourceMotion(), m_blendOffsetPose, lowestCostFrame.GetSampleTime());
+                sourcePose->GetPose().MakeAdditive(m_blendOffsetPose);
+                m_blendOffsetPose = sourcePose->GetPose();
+                posePool.FreePose(sourcePose);
 
-                // Store the current motion instance state, so we can sample this as source pose.
-                m_prevMotionInstance->SetMotion(m_motionInstance->GetMotion());
-                m_prevMotionInstance->SetMirrorMotion(m_motionInstance->GetMirrorMotion());
-                m_prevMotionInstance->SetCurrentTime(newMotionTime);
-                m_prevMotionInstance->SetLastCurrentTime(m_prevMotionInstance->GetCurrentTime() - timePassedInSeconds);
+                m_blendProgressTime = 0.0f;
+                m_blendWeight = 1.0f;
 
                 m_lowestCostFrameIndex = lowestCostFrameIndex;
 
@@ -544,7 +480,7 @@ namespace EMotionFX::MotionMatching
             const Frame& frame = frameDatabase.GetFrame(frameIndex);
 
             // TODO: This shouldn't be there, we should be discarding the frames when extracting the features and not at runtime when checking the cost.
-            if (frame.GetSampleTime() >= frame.GetSourceMotion()->GetDuration() - 1.0f)
+            if (frame.GetSampleTime() >= frame.GetSourceMotion()->GetDuration() - m_cachedTrajectoryFeature->GetFutureTimeRange())
             {
                 continue;
             }

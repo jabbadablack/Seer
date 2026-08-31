@@ -103,6 +103,7 @@ namespace EMotionFX::MotionMatching
         float m_pathRadius = 1.0f;
         float m_pathSpeed = 1.0f;
         float m_lowestCostSearchFrequency = 5.0f;
+        float m_blendTime = 0.25f;
         AZ::u32 m_sampleRate = 30;
         AZ::u32 m_maxKdTreeDepth = 15;
         AZ::u32 m_minFramesPerKdTreeNode = 1000;
